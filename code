@@ -122,9 +122,68 @@ void init_pwm()
 }
 
 double input_adcread(uint8_t channel)
+{
 	double adcreading = 0;
 	ADMUX = channel; 		/*select channel as ADC input*/
 	ADCSRA |= _BV(ADSC);	 /* Start Conversions */
 	
-
+	while (ADCSRA & _BV(ADSC));
+	ADCread = ((ADCIn * VREF)/ADCMAX ); /*single ended conversion result ADC = Vin * 1024 / Vref, in this case ADCread = Vin*/
 	
+	return (double) ADCread; /*return result as double*/
+}
+
+double calculateRMS(uint8_t channel)
+{
+	/* RMS formula = Vmax * 1/(√2)
+	/* for busbar voltage and busbar current, 50Hz AC from -4V to 4V*/ 
+	/* in one period, 50Hz = 20ms , the half of the wave would be 25Hz, max peak would be approximate 30ms*/ 
+	
+	uint32_t periodend = counter + 30;
+	double value = 0;
+	double maxvalue = 0; 
+	
+	/*within period of 30ms, we need to find the max amplitude*/
+	while 
+	{
+		value = input_adcread(channel);
+		if (value > maxvalue)
+			maxvalue = value;
+	}
+	
+	maxvalue = (maxvalue/sqrt(2)); //finding rms from the max amplitude*/
+	return maxvalue;
+}
+
+void LoadDigital () 
+{
+	/*Get Load 1 call*/ 
+	int input = PINA & _BV(CALL_LOAD1);
+	/* Set to Boolean*/ 
+	if (input) 
+		Load_Call[0] = true;
+	else 
+		Load_Call[0] = false;
+	
+	/*Get Load 2 call*/ 
+	int input = PINA & _BV(CALL_LOAD2);
+	/* Set to Boolean*/ 
+	if (input) 
+		Load_Call[1] = true;
+	else 
+		Load_Call[1] = false;
+	
+	/*Get Load 3 call*/ 
+	int input = PINA & _BV(CALL_LOAD3);
+	/* Set to Boolean*/ 
+	if (input) 
+		Load_Call[2] = true;
+	else 
+		Load_Call[2] = false;
+	
+}
+	
+	
+
+
+
