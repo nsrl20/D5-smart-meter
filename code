@@ -1,0 +1,130 @@
+#include "../lcdlib/lcd.h"
+#include "../lcdlib/ili934x.h"  
+#include "../lcdlib/avrlcd.h"
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <stdbool.h>
+
+#define F_CPU 12000000UL
+#define VREF 3.3
+#define ADCMAX 1023
+
+//SETTING UP THE PINS FOR INPUTS AND OUTPUTS 
+
+/* Analogue input pins*/
+/* PORTA use for the ADC Function*/
+#define I_WIND PA0
+#define I_PV PA1 
+#define V_BUSBAR PA2
+#define I_BUSBAR PA3 
+
+/*Digital Input Pins*/
+#define CALL_LOAD1 PA4
+#define CALL_LOAD2 PA5
+#define CALL_LOAD3 PA6
+
+/*Digital Output Pins */
+#define CHARGE_BATTERY PD2
+#define DISCHARGE_BATTERY PD3
+#define SWITCH_LOAD1 PD4
+#define SWITCH_LOAD2 PD5
+#define SWITCH_LOAD3 PD6 
+
+/*Mains Request output call*/
+#define MAIN_CALL PD7 
+
+/*Double for mains required*/
+double mains_req = 0;
+
+/*Doubles for input values*/
+double mains_capacity = 0;
+double busbar_volt = 0;
+double busbar_curr = 0;
+double wind_cap = 0;
+double pv_cap = 0;
+
+/*Boolean array for loads and switches*/
+bool Load_Call[3]={ true, true, false};
+bool Load_Sw[3]= {true ,false, false};
+
+/*Boolean array for charging and discharging battery*/
+bool charging_battery = false;
+bool discharging_battery = false;
+
+/*Boolean array for power consumption*/
+double total_power = 0;
+
+/* Counter can last up until 106751991 days before it overflows */
+volatile uint64_t counter ; 
+/* Battery counter */
+volatile uint32_t battery_counter = 0 ;
+
+/* Battery level */
+int battery_lvl = 0 ;
+
+/*********************************** New Section **********************************/
+/**Function base initialisation*/
+
+/* Interupt service routine */
+ISR(TIMER1_COMPA_vect) ;
+{
+/*counter incremented by every 1 milisecond*/
+	counter++;
+}	
+
+void init_timer()
+{
+	TCCR1A |= 0; 		   //timer for cycle control
+	TCCR1B |= _BV(WGM13);  //cycle to cycle (CTC Mode) 
+	TCCR1B |= _BV(CS11);   // Prescaler set to 8 
+	OCR1A  |= 1499; 	   // TOP-1, 12MHz/8= 1500000 X 10^-3= 1500
+	TIMSK1 |= _BV(OCIE1A); // Output Compare A Match Interrupt Enable
+}
+
+void init_ADC()
+{ 
+	/*ADEN = 1;  //Enable the ADC 
+	  ADPS1 = 1; 
+	  ADPS2 = 1; 
+	  ADPS0 = 0; // 1,1,0 ADC Prescaler Selections : Division factor 64*/
+	  
+	  ADCSRA |= _BV(ADEN) | _BV(ADPS2) | _BV(ADPS1); /* F_ADC= F_CPU/64 = 187.5kHz */
+}
+	 
+void init_digital()
+{
+	/*set digital inputs at PORTA*/
+	/*Load call input*/
+	DDRA &= ~(_BV(CALL_LOAD1)|_BV(CALL_LOAD2)|_BV(CALL_LOAD3));
+	PORTA &= ~(_BV(CALL_LOAD1)|_BV(CALL_LOAD2)|_BV(CALL_LOAD3));
+	
+	/*setting digital output at PORTD*/
+	/*Load switch, charge and discharge*/
+	
+	DDRD |=_BV(SWITCH_LOAD1)|_BV(SWITCH_LOAD2)|_BV(SWITCH_LOAD3)|_BV(CHARGE_BATTERY)|_BV(DISCHARGE_BATTERY);
+	PORTD &= ~(_BV(SWITCH_LOAD1)|_BV(SWITCH_LOAD2)|_BV(SWITCH_LOAD3)|_BV(CHARGE_BATTERY)|_BV(DISCHARGE_BATTERY));
+}
+
+void init_pwm()
+{
+	/*set Pin  D7 as output */
+	DDRD |= _BV(MAIN_CALL);
+	
+	/*Set up Timer/Counter2 Output Compare Match A Output on the Fast PWM*/ 
+	/*Pin OC2A is set to be non-inverted*/
+	TCCR2A |= _BV(COM2A1)|_BV(WGM20)|_BV(WGM21);
+	
+	/*set to no prescaler */
+	TCCR2B |= _BV(CS20);
+}
+
+double input_adcread(uint8_t channel)
+	double adcreading = 0;
+	ADMUX = channel; 		/*select channel as ADC input*/
+	ADCSRA |= _BV(ADSC);	 /* Start Conversions */
+	
+
+	
