@@ -1,8 +1,18 @@
-#include "../lcdlib/lcd.h"
-#include "../lcdlib/ili934x.h"  
-#include "../lcdlib/avrlcd.h"
+/*
+SMART METER SOFTWARE CONTROL
+Author: Noor Syazwani Atiqah Binti Ros Lee 
+*/ 
+
+
+//avr-gcc -mmcu=atmega644p -L../lcdlib -o prog.elf prog.c -llcd
+//avr-objcopy -O ihex prog.elf prog.hex
+//avrdude -c usbasp -p m644p -U flash:w:prog.hex
+
+
+#include "lcd.h"
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <util/delay.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -47,15 +57,22 @@ double wind_cap = 0;
 double pv_cap = 0;
 
 /*Boolean array for loads and switches*/
-bool Load_Call[3]={ true, true, false};
-bool Load_Sw[3]= {true ,false, false};
+//bool Load_Call[3]={ true, true, false};
+//bool Load_Sw[3]= {true ,false, false};
+bool Load_Call1 =0;
+bool Load_Call2 = 0;
+bool Load_Call3 =0;
+
+bool Load_Sw1 =0;
+bool Load_Sw2 =0;
+bool Load_Sw3 =0;
 
 /*Boolean array for charging and discharging battery*/
-bool charging_battery = false;
-bool discharging_battery = false;
+bool charging_battery = 0;
+bool discharging_battery = 0;
 
 /*Boolean array for power consumption*/
-double total_power = 0;
+double power_consumption = 0;
 
 /* Counter can last up until 106751991 days before it overflows */
 volatile uint64_t counter ; 
@@ -63,18 +80,71 @@ volatile uint64_t counter ;
 volatile uint32_t battery_counter = 0 ;
 
 /* Battery level */
-int battery_lvl = 0 ;
+int battery_level = 0 ;
 
-/*********************************** New Section **********************************/
-/**Function base initialisation*/
+/* ==================================
+    Function base initialisation 
+	==================================*/
 
 /* Interupt service routine */
 ISR(TIMER1_COMPA_vect) ;
+
+/*Initialisation*/
+void init_ADC();
+void init_digital();
+void init_timer();
+void init_pwm();
+rectangle create_bar(int y, double value);
+
+/*Measure Inputs*/
+double input_adcread(uint8_t channel);
+double calculateRMS(uint8_t channel);
+void LoadDigital();
+
+/*Calculate Output*/
+void OutputPWM();
+void OutputDigital ();
+
+/*Read and send inputs and output*/
+void ReadInputs();
+void SendOutput();
+
+/*Logics*/
+double checkLoadDemand(bool call , double current);
+void ControlFlow (bool load1_call, bool load2_call, bool load3_call);
+
+/*Display graphics*/
+//int display_BoolCheck(bool load);
+//void display_Line();
+void display_Double (int xpos,int ypos, char*name, double value, char*units, int width, int decimal_places);
+//void display_Loads(int xpos, int ypos, char*name, bool load_call, bool load_switch);
+//void display_Battery( int xpos, int ypos, char*name , bool charging, bool discharging);
+//void display_Value();
+//void display_PixelShift(rectangle*shape, int width);
+//void display_TeamName();
+
+/*Updates screen and information
+void update_Line(rectangle*bar, double value, int ypos);
+void update_BatteryLevel();*/
+
+/*Delays*/
+//void delay_500ms();
+
+
+/*=======================================
+           Functions Definitions 
+  ======================================*/
+ISR(TIMER1_COMPA_vect)
 {
 /*counter incremented by every 1 milisecond*/
 	counter++;
-}	
-
+	
+	/*Counter for battery level*/
+	if ((charging_battery)&&(battery_counter <720000))
+		battery_counter++;
+	if ((discharging_battery)&& (battery_counter>0))
+		battery_counter--;
+}
 void init_timer()
 {
 	TCCR1A |= 0; 		   //timer for cycle control
@@ -123,19 +193,19 @@ void init_pwm()
 
 double input_adcread(uint8_t channel)
 {
-	double adcreading = 0;
+	double ADCread = 0;
 	ADMUX = channel; 		/*select channel as ADC input*/
 	ADCSRA |= _BV(ADSC);	 /* Start Conversions */
 	
 	while (ADCSRA & _BV(ADSC));
-	ADCread = ((ADCIn * VREF)/ADCMAX ); /*single ended conversion result ADC = Vin * 1024 / Vref, in this case ADCread = Vin*/
+	ADCread = ((ADC * VREF)/ADCMAX ); /*single ended conversion result ADC = Vin * 1024 / Vref, in this case ADCread = Vin*/
 	
 	return (double) ADCread; /*return result as double*/
 }
 
 double calculateRMS(uint8_t channel)
 {
-	/* RMS formula = Vmax * 1/(√2)
+	/* RMS formula = Vmax * 1/(√2)*/
 	/* for busbar voltage and busbar current, 50Hz AC from -4V to 4V*/ 
 	/* in one period, 50Hz = 20ms , the half of the wave would be 25Hz, max peak would be approximate 30ms*/ 
 	
@@ -144,7 +214,7 @@ double calculateRMS(uint8_t channel)
 	double maxvalue = 0; 
 	
 	/*within period of 30ms, we need to find the max amplitude*/
-	while 
+	while (counter <=periodend)
 	{
 		value = input_adcread(channel);
 		if (value > maxvalue)
@@ -161,29 +231,279 @@ void LoadDigital ()
 	int input = PINA & _BV(CALL_LOAD1);
 	/* Set to Boolean*/ 
 	if (input) 
-		Load_Call[0] = true;
+		Load_Call1 = 1;
 	else 
-		Load_Call[0] = false;
+		Load_Call1 = 0;
 	
 	/*Get Load 2 call*/ 
-	int input = PINA & _BV(CALL_LOAD2);
+	input = PINA & _BV(CALL_LOAD2);
 	/* Set to Boolean*/ 
 	if (input) 
-		Load_Call[1] = true;
+		Load_Call2 = 0;
 	else 
-		Load_Call[1] = false;
+		Load_Call2 = 0;
 	
 	/*Get Load 3 call*/ 
-	int input = PINA & _BV(CALL_LOAD3);
+	input = PINA & _BV(CALL_LOAD3);
 	/* Set to Boolean*/ 
 	if (input) 
-		Load_Call[2] = true;
+		Load_Call3 = 0;
 	else 
-		Load_Call[2] = false;
+		Load_Call3 = 0;
 	
 }
+
+void OutputPWM()
+{
+	/* set the duty cycle of the PWM */
+	OCR2A = (mains_req/2) * 255 ; //from handbook
+}
+
+void OutputDigital()
+{
+	/*Set the Load Switch 1 high */ 
+	if (Load_Sw1==1)
+		PORTD |= _BV(SWITCH_LOAD1);
+	else 
+		PORTD &= ~(_BV(SWITCH_LOAD1));
 	
+	/*Set the Load Switch 2 high */ 
+	if (Load_Sw2==1)
+		PORTD |= _BV(SWITCH_LOAD2);
+	else 
+		PORTD &= ~(_BV(SWITCH_LOAD2));
 	
+	/*Set the Load Switch 3 high */ 
+	if (Load_Sw3==1)
+		PORTD |= _BV(SWITCH_LOAD3);
+	else 
+		PORTD &= ~(_BV(SWITCH_LOAD3));
+	
+	/*Set the switch for charging battery*/
+	if (charging_battery)
+		PORTD |= _BV(CHARGE_BATTERY);
+	else 
+		PORTD &= ~(_BV(CHARGE_BATTERY));
+	
+	/*Set the switch for Discharging battery*/
+	if (discharging_battery)
+		PORTD |= _BV(DISCHARGE_BATTERY);
+	else 
+		PORTD &= ~(_BV(DISCHARGE_BATTERY));
+}
+
+void ReadInputs()
+{
+	/*Read analogue signal values*/
+	//busbar_volt = calculateRMS(0);
+	//busbar_curr = calculateRMS(1);
+	wind_cap = input_adcread(2);
+	pv_cap = input_adcread(3);
+	
+	/*Get the load calls*/
+	LoadDigital();
+}
+
+void SendOutput()
+{
+	/*send the outputs*/
+	OutputPWM();
+	OutputDigital();
+}
+
+double checkLoadDemand(bool call, double current)
+{
+/*return value of the current required by the load*/
+	if (call==1) 
+		return current;
+	else 
+		return 0; 
+}
+/*===============
+	ALGORITHM
+  ===============*/
+  
+void ControlFlow (bool load1_call, bool load2_call, bool load3_call)
+{
+	//Initialize variables 
+	//int i = 0; 
+	mains_req = 0;
+	charging_battery =0;
+	discharging_battery =0;
+	bool checkLoad1 = 1;
+	bool checkLoad2 = 1;
+	bool checkLoad3 = 1;
+	
+	//Maximum Mains Current//
+	double max_MainsCurrent = 2.0; 
+	
+	//Calculate total load requirements*/
+	double load1_demand = checkLoadDemand(load1_call, 1.2);
+	double load2_demand = checkLoadDemand(load2_call, 2.0);
+	double load3_demand = checkLoadDemand(load3_call, 0.8);
+	
+	//Calculate the total renewable energy and load//
+	double totalRenewable  = wind_cap + pv_cap;
+	double totalLoadEnergy = load1_demand + load2_demand + load3_demand;
+
+	//Check if the energy is enough//
+	if (totalRenewable >= totalLoadEnergy)
+{	//Calculate excess current// 
+	double excesscurrent = totalRenewable - totalLoadEnergy;
+	
+	//check if excess, should we discharge or charge battery//
+	if (excesscurrent >= 1) //if more than 1A, charge the battery//
+	{
+		charging_battery = 1;
+		discharging_battery = 0;
+		checkLoad1 = 1;
+		checkLoad2 = 1;
+		checkLoad3 = 1;
+	}
+
+	 //Excess current insufficient for battery - draw mains
+	else if (excesscurrent > 1 && excesscurrent < 0)
+	{
+		// Request extra current from main to charge the battery//
+		mains_req = ((1.0-excesscurrent)*(10/max_MainsCurrent));
+		charging_battery = 1;
+		discharging_battery = 0; 
+		checkLoad1 = 1;
+		checkLoad2 = 1;
+		checkLoad3 = 1;
+	}
+	else 
+	{
+	// maintain the battery at idle state, total renewable energy is the same as total load current//
+		charging_battery = 0;
+		discharging_battery = 0;
+		checkLoad1 = 1;
+		checkLoad2 = 1;
+		checkLoad3 = 1;
+	}
+}
+	else 
+	{//If renewable energy is less than load demands// 
+		double CurrentRequirement = totalLoadEnergy - totalRenewable;
+		if ((CurrentRequirement > 0)&& (CurrentRequirement <=3))
+		{
+			//Calculate required mains//
+		mains_req = CurrentRequirement *(10/max_MainsCurrent);
+		charging_battery = 0;
+		discharging_battery = 0;
+		checkLoad1 = 1;
+		checkLoad2 = 1;
+		checkLoad3 = 1;
+		
+		}
+		else if ((CurrentRequirement  > 3) && (CurrentRequirement <= 4))
+		{
+			//Calculate mains required after discharging battery//
+		double  NewCurrentRequired = CurrentRequirement - 1;
+			//Calculate new mains current//
+		mains_req = NewCurrentRequired * (10/max_MainsCurrent);
+		charging_battery = 0;
+		discharging_battery = 1;
+		checkLoad1 = 1;
+		checkLoad2 = 1;
+		checkLoad3 = 1;
+		}
+	}
+	/* ===============================
+	      Set the load switches 
+	   ===============================*/
+	   
+	 // Load Switch 1//
+	if((checkLoad1==1)&&(Load_Call1==1))
+		Load_Sw1= 1;
+	else 
+		Load_Sw1 = 0;
+	
+	//Load Switch 2//
+	if((checkLoad2==1)&&(Load_Call2==1))
+		Load_Sw2 =1;
+	else 
+		Load_Sw2 =0;
+	
+	//Load Switch 3//
+	if((checkLoad3==1)&&(Load_Call3==1))
+		Load_Sw3 = 1;
+	else 
+		Load_Sw3 =0; 
+		
+	  
+	  power_consumption = (busbar_volt* (400/VREF)*totalLoadEnergy)/1000;
+	 }
+	
+/* =======================
+	DISPLAY FUNCTIONS
+   ======================*/
 
 
+void display_Double (int xpos,int ypos,char*name,double value,char*units, int width, int decimal_places)
+{
+	/*set font colour as white */
+	display.foreground = WHITE;
+
+	/*Set position on the screen*/
+	display.x = xpos;
+	display.y = ypos;
+
+	/*Temporary value for converting double to string*/
+	char string[10];
+	
+	/*Converting double to string*/
+	//sprintf (temp_value, "%4.2lf", value);// Print variable to 4 field width and 2 digits after decimal point// 
+	dtostrf ( value , width , decimal_places, string );
+	
+	/*Print the converted double as string*/
+	display_string(name);
+	display_string(string);
+	display_string(units);
+}
+
+
+/* ==================
+	MAIN SEQUENCE
+   ==================*/	
+	   
+int main ()
+{
+	/*TFT display bootup*/
+	init_lcd();
+	
+	/*Setup display orientation*/
+	orientation o = East;
+	set_orientation (o);
+	
+	/*Restart the screen*/
+	clear_screen ();
+	
+	/*Setup ADC*/ 
+	init_ADC();
+	
+	/*Setup digital InOuts*/
+	init_digital();
+	
+	/*Setup timer*/
+	init_timer();
+	
+	/*Setup PWM*/
+	init_pwm();
+	
+	/*Enable interrupts*/
+	sei();
+	
+	
+	/*Forever Loop*/
+	for (;;)
+	{
+		
+	/*Read all inputs signals*/
+	ReadInputs();
+	display_Double(100,120,"Value of ADC PV  = ", pv_cap, "v" , 3,2);
+	display_Double(100,140,"Value of ADC Wind =",wind_cap,"V" , 3,2);
+	}
+	return 0;
+	}
 
